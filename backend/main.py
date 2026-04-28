@@ -1,4 +1,8 @@
 import os
+import sys
+
+# Ensure project root is in sys.path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import logging
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -7,13 +11,14 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 # Import from our existing modules
-from backend.routing_engine import (
+
+from .routing_engine import (
     load_resources as load_routing_resources,
     build_distance_matrix,
     solve_vrp,
     generate_full_route
 )
-from backend.utils import get_route_coordinates
+from .utils import get_route_coordinates
 
 # Import generation logic from data_pipeline
 from data_pipeline import (
@@ -28,12 +33,41 @@ from fastapi.responses import RedirectResponse, Response
 # --- 1️⃣ INITIAL SETUP ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# --- 2️⃣ LOAD DATA ON STARTUP ---
+from contextlib import asynccontextmanager
 
+# FastAPI lifespan
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global graph, deliveries_df
+    logger.info("Loading data on startup (lifespan)...")
+    try:
+        graph, _ = load_routing_resources()
+        deliveries_df = pd.read_csv(DELIVERIES_PATH)
+        logger.info("Data loaded successfully.")
+    except FileNotFoundError as e:
+        logger.error(f"Failed to load data: {e}")
+    yield
+
+# FastAPI app definition
 app = FastAPI(
     title="Optimized Delivery Routes API",
     description="API for computing optimized delivery routes.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
+# Enable CORS for frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for simplicity
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+GRAPH_PATH = os.path.join(PROJECT_ROOT, "data", "map.graphml")
+DELIVERIES_PATH = os.path.join(PROJECT_ROOT, "data", "deliveries.csv")
 
 # --- Root Redirect to Docs ---
 @app.get("/")
@@ -46,38 +80,6 @@ def root():
 def favicon():
     """Returns a 204 No Content response for favicon requests."""
     return Response(status_code=204)
-
-# Enable CORS for frontend access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for simplicity
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
-
-# --- 2️⃣ LOAD DATA ON STARTUP ---
-GRAPH_PATH = os.path.join("data", "map.graphml")
-DELIVERIES_PATH = os.path.join("data", "deliveries.csv")
-
-# Global variables to hold loaded data
-graph = None
-deliveries_df = None
-
-@app.on_event("startup")
-def startup_event():
-    """Load graph and delivery data when the server starts."""
-    global graph, deliveries_df
-    logger.info("Loading data on startup...")
-    try:
-        # Use the loader from the routing engine to ensure consistency
-        graph, _ = load_routing_resources() # We only need the graph here
-        deliveries_df = pd.read_csv(DELIVERIES_PATH)
-        logger.info("Data loaded successfully.")
-    except FileNotFoundError as e:
-        logger.error(f"Failed to load data: {e}")
-        # In a real app, you might want to prevent startup
-        # For now, we log the error and endpoints will fail gracefully
 
 # --- 3️⃣ API ENDPOINTS ---
 

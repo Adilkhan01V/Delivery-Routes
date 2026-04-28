@@ -7,8 +7,9 @@ from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
 # --- 1️⃣ LOAD DATA ---
-GRAPH_PATH = os.path.join("data", "map.graphml")
-DELIVERIES_PATH = os.path.join("data", "deliveries.csv")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+GRAPH_PATH = os.path.join(PROJECT_ROOT, "data", "map.graphml")
+DELIVERIES_PATH = os.path.join(PROJECT_ROOT, "data", "deliveries.csv")
 OUTPUT_PATH = "optimized_route.json"
 
 def load_resources():
@@ -80,15 +81,24 @@ def build_distance_matrix(G, nodes):
 
     for i, source in enumerate(nodes):
         row = []
+        if source not in G:
+            print(f"Skipping unreachable source node: {source}")
+            lengths = {}
+        else:
+            try:
+                # Optimized: Compute all shortest path lengths from source in one pass
+                lengths = nx.single_source_dijkstra_path_length(G, source, weight='travel_weight')
+            except Exception as e:
+                print(f"Error computing paths from {source}: {e}")
+                lengths = {}
+                
         for j, target in enumerate(nodes):
             if i == j:
                 row.append(0)
+            elif target in lengths:
+                row.append(int(lengths[target]))
             else:
-                _, cost = get_shortest_path(G, source, target)
-                if cost == float('inf'):
-                    row.append(infinity_surrogate)
-                else:
-                    row.append(int(cost))
+                row.append(infinity_surrogate)
         matrix.append(row)
     return matrix
 
