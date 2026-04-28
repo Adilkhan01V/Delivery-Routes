@@ -5,3 +5,4 @@ osmnx
 pandas
 ortools
 pydantic
+scikit-learn
